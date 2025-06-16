@@ -1,0 +1,116 @@
+body {
+    font-family: sans-serif;
+    margin: 0;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+header {
+    background-color: #333;
+    color: #fff;
+    padding: 1em 0;
+    text-align: center;
+}
+
+main {
+    width: 90%;
+    margin: 20px auto;
+    background-color: #fff;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+#character-selection h2, #chat-interface h2, #settings-placeholder h2 {
+    color: #333;
+}
+
+.character-options img {
+    width: 100px;
+    height: 100px;
+    margin: 10px;
+    cursor: pointer;
+    border: 2px solid transparent;
+}
+
+.character-options img:hover, .character-options img.selected {
+    border-color: #007bff;
+}
+
+#chat-history {
+    height: 200px;
+    border: 1px solid #ccc;
+    margin-bottom: 10px;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+#voice-controls button {
+    padding: 10px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+#voice-controls button:hover {
+    background-color: #0056b3;
+}
+
+#stt-output {
+    margin-top: 10px;
+    font-style: italic;
+}
+
+footer {
+    text-align: center;
+    padding: 10px 0;
+    background-color: #333;
+    color: #fff;
+    position: relative;
+    bottom: 0;
+    width: 100%;
+}
+
+/* Append to existing style.css */
+
+#chat-history {
+    /* ... existing styles ... */
+    background-color: #e9e9e9; /* Light grey background for chat area */
+}
+
+.chat-message {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 15px;
+    max-width: 70%;
+    line-height: 1.4;
+}
+
+.user-message {
+    background-color: #007bff;
+    color: white;
+    margin-left: auto; /* Align to the right */
+    border-bottom-right-radius: 5px;
+}
+
+.assistant-message {
+    background-color: #d1ecf1; /* Light blue for assistant */
+    color: #0c5460;
+    margin-right: auto; /* Align to the left */
+    border-bottom-left-radius: 5px;
+}
+
+.chat-message strong { /* Styling for sender name */
+    display: block;
+    font-size: 0.9em;
+    margin-bottom: 3px;
+    color: inherit; /* Inherit color from parent message type */
+}
+
+/* Ensure user message's strong tag is also white if not inheriting properly */
+.user-message strong {
+    color: #f0f0f0;
+}
+.assistant-message strong {
+    color: #004085;
+}
