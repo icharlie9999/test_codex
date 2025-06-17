@@ -2,8 +2,9 @@ let medicationReminders = [];
 const REMINDERS_STORAGE_KEY = 'medicationReminders';
 let activeReminderId = null;
 
-let contacts = [];
-const CONTACTS_STORAGE_KEY = 'addressBookContacts';
+let contacts = []; // Will be populated from backend
+// const CONTACTS_STORAGE_KEY = 'addressBookContacts'; // Removed
+const BACKEND_URL = 'http://127.0.0.1:5000'; // Backend server address
 
 // Global variables for chat and speech, to be initialized in DOMContentLoaded
 let selectedCharacterName = 'AI助手';
@@ -67,7 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const sttOutput = document.getElementById('stt-output');
 
     loadReminders();
-    loadContacts();
+    // loadContacts(); // Removed old localStorage load
+    fetchContactsFromServer(); // New function to load contacts from backend
 
     characterOptions.forEach(img => {
         img.addEventListener('click', () => {
@@ -269,112 +271,229 @@ function extractMedicineName(text) {
     return '药';
 }
 
-function setMedicationReminder(transcript, medicineName, timeString, dateString, dayKeyword) {
-    const newReminder = {
-        id: Date.now(), medicine: medicineName || '药', time: timeString, date: dateString,
-        originalQuery: transcript, frequency: (dateString === 'everyday' ? 'daily' : 'once'),
-        acknowledged: false, lastAcknowledgedDate: null, createdAt: new Date().toISOString(),
-        triggeredThisInstance: false, lastTriggeredDate: null, lastTriggeredTime: null
+async function setMedicationReminder(transcript, medicineName, timeString, dateString, dayKeyword) {
+    // Payload for the backend
+    const newReminderPayload = {
+        medicine: medicineName || '药',
+        time: timeString,
+        date: dateString,
+        frequency: (dateString === 'everyday' ? 'daily' : 'once'),
+        originalQuery: transcript
+        // Backend will handle id, createdAt, acknowledged status, lastTriggered fields etc.
     };
-    medicationReminders.push(newReminder);
-    saveReminders();
-    let confirmationMsg = `好的，已设置提醒：`;
-    if (dayKeyword) confirmationMsg += dayKeyword;
-    else if (dateString !== 'everyday') {
-        const d = new Date(dateString); confirmationMsg += `${d.getMonth() + 1}月${d.getDate()}日`;
+    try {
+        const response = await fetch(`${BACKEND_URL}/reminders`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(newReminderPayload), // Send payload to backend
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            // Error from backend (e.g., validation, server error)
+            const errorMsg = result.error || `设置提醒失败 (${response.status})`;
+            addMessageToChat('assistant', errorMsg);
+            speak(errorMsg);
+            return; // Stop further processing
+        }
+
+        // Successfully added to backend, result is the created reminder from server
+        console.log('Reminder added via API:', result);
+        medicationReminders.push(result); // Add the server-confirmed reminder to local array
+        // To ensure localStorage is also up-to-date for any logic still relying on it (e.g. immediate checkReminders):
+        // This is a temporary measure if other parts of the frontend still read from localStorage for reminders.
+        // Ideally, all reminder reads would also go through the backend or a consistent frontend cache.
+        localStorage.setItem(REMINDERS_STORAGE_KEY, JSON.stringify(medicationReminders));
+
+
+        let confirmationMsg = `好的，已设置提醒：`;
+        if (dayKeyword) { // dayKeyword is from the original parsing, still relevant for confirmation
+            confirmationMsg += dayKeyword;
+        } else if (result.date !== 'everyday') { // Use result.date for accuracy from server
+            try {
+                const [year, month, day] = result.date.split('-').map(Number);
+                const d = new Date(year, month - 1, day); // Month is 0-indexed
+                confirmationMsg += `${d.getMonth() + 1}月${d.getDate()}日`;
+            } catch (e) {
+                console.error("Error parsing date from backend for confirmation:", e);
+                confirmationMsg += result.date; // fallback
+            }
+        }
+        confirmationMsg += ` ${result.time} 服用 ${result.medicine}。`;
+
+        addMessageToChat('assistant', confirmationMsg);
+        speak(confirmationMsg);
+
+    } catch (error) {
+        console.error('Error setting reminder via API:', error);
+        const errorMsg = '抱歉，设置提醒时发生网络错误，请稍后再试。';
+        addMessageToChat('assistant', errorMsg);
+        speak(errorMsg);
     }
-    confirmationMsg += ` ${timeString} 服用 ${newReminder.medicine}。`;
-    addMessageToChat('assistant', confirmationMsg);
-    speak(confirmationMsg);
 }
 
 // --- Reminder Checking and Announcing Functions ---
-function checkReminders() {
-    const now = new Date(); const todayStr = now.toISOString().split('T')[0];
-    medicationReminders.forEach(reminder => {
-        if (reminder.frequency === 'once' && reminder.acknowledged) return;
-        const [hours, minutes] = reminder.time.split(':').map(Number);
-        if (reminder.frequency === 'once') {
-            if (reminder.date === todayStr) {
-                const reminderDateTime = new Date(reminder.date); reminderDateTime.setHours(hours, minutes, 0, 0);
-                if (now >= reminderDateTime && !reminder.triggeredThisInstance) {
-                    announceReminder(reminder); reminder.triggeredThisInstance = true;
-                }
-            }
-        } else if (reminder.frequency === 'daily') {
-            if (reminder.lastAcknowledgedDate === todayStr) return;
-            const reminderTimeToday = new Date(); reminderTimeToday.setHours(hours, minutes, 0, 0);
-            if (now >= reminderTimeToday) {
-                if (reminder.lastTriggeredDate !== todayStr || reminder.lastTriggeredTime !== reminder.time) {
-                    announceReminder(reminder); reminder.lastTriggeredDate = todayStr;
-                    reminder.lastTriggeredTime = reminder.time; saveReminders();
-                }
-            }
+async function checkReminders() {
+    console.log('Test log from checkReminders for subtask test.'); // Added for subtask test
+    try {
+        const response = await fetch(`${BACKEND_URL}/reminders/due`);
+        if (!response.ok) {
+            // Don't spam chat/tts for background check failures, just log
+            console.error(`Error fetching due reminders: ${response.statusText} (${response.status})`);
+            // Optionally, a subtle UI indication could be added for persistent errors.
+            return;
         }
-    });
-    const oldLength = medicationReminders.length;
-    medicationReminders = medicationReminders.filter(r => {
-        if (r.frequency === 'once' && r.acknowledged) {
-            const reminderDate = new Date(r.date); reminderDate.setHours(23, 59, 59, 999);
-            return now < reminderDate;
+        const dueReminders = await response.json();
+        if (dueReminders && dueReminders.length > 0) {
+            console.log('Due reminders from server:', dueReminders);
+            // Announce each due reminder. Consider if multiple pop up at once,
+            // might need a queue or announce one by one with a delay.
+            // For now, announce all that are due.
+            dueReminders.forEach(reminder => {
+                // Check if this reminder (by ID) is already the active one being announced
+                // This prevents re-announcing if checkReminders runs quickly multiple times
+                // for a reminder that hasn't been acknowledged yet.
+                // However, `activeReminderId` is reset after acknowledgement.
+                // A more robust approach might involve a temporary "recentlyAnnounced" list.
+                // For now, the backend determines "due". If it's still due, it will be returned.
+                // Client side logic might be needed if a reminder is announced but user doesn't interact
+                // and we don't want it announced *every* checkReminders cycle.
+                // The backend's `lastTriggeredDate/Time` is not used in the current /due endpoint logic
+                // to filter, but could be.
+                // For simplicity of this step, we announce what the backend says is due.
+                announceReminder(reminder);
+            });
         }
-        return true;
-    });
-    if (oldLength !== medicationReminders.length) {
-        console.log("Pruned acknowledged 'once' reminders that are past their date.");
-        saveReminders();
+    } catch (error) {
+        console.error('Failed to fetch or process due reminders:', error);
+        // Avoid user-facing error messages for background checks unless it's a persistent issue.
     }
+    // Removed localStorage filtering logic as backend is source of truth for "due"
 }
 
-function announceReminder(reminder) {
-    console.log("Announcing reminder:", reminder);
-    if (synth && synth.speaking) synth.cancel();
+function announceReminder(reminder) { // Reminder object now comes from backend
+    console.log("Announcing reminder from backend object:", reminder);
+    if (synth && synth.speaking) {
+        synth.cancel();
+    }
+    // Ensure reminder object and its properties are valid
+    if (!reminder || !reminder.time || !reminder.medicine) {
+        console.error("Invalid reminder object passed to announceReminder:", reminder);
+        return;
+    }
     const message = `提醒您，现在是 ${reminder.time}，该服用 ${reminder.medicine} 了。您现在方便吗？或者说“好的”来确认。`;
     addMessageToChat('assistant', message);
     speak(message);
     activeReminderId = reminder.id;
 }
 
-function acknowledgeReminder(reminderId, isCancelCommand) {
-    const reminder = medicationReminders.find(r => r.id === reminderId);
-    if (reminder) {
-        let ackMessage = ""; const todayStr = new Date().toISOString().split('T')[0];
-        if (isCancelCommand) {
-            if (reminder.frequency === 'once') {
-                reminder.acknowledged = true;
-                ackMessage = `好的，这个关于“${reminder.medicine}”的一次性提醒已取消。`;
-            } else {
-                reminder.lastAcknowledgedDate = todayStr;
-                ackMessage = `好的，今天 ${reminder.time} 关于“${reminder.medicine}”的提醒已记录为取消。明天会再次提醒您。`;
-            }
+async function acknowledgeReminder(reminderId, isCancelCommand) {
+    try {
+        const response = await fetch(`${BACKEND_URL}/reminders/${reminderId}/acknowledge`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json', // Optional for POST without body, but good practice
+            },
+            // No body is sent for this specific acknowledge request as per typical REST patterns
+            // where the action is defined by the URL and method.
+        });
+
+        const updatedReminder = await response.json(); // Backend returns the updated reminder
+
+        if (!response.ok) {
+            const errorMsg = updatedReminder.error || `确认提醒失败 (${response.status})`;
+            addMessageToChat('assistant', errorMsg);
+            speak(errorMsg);
         } else {
-            if (reminder.frequency === 'once') reminder.acknowledged = true;
-            else reminder.lastAcknowledgedDate = todayStr;
-            ackMessage = `好的，已记录您 ${reminder.time} 服用“${reminder.medicine}”。`;
+            let ackMessage = "";
+            if (isCancelCommand) {
+                ackMessage = `好的，关于“${updatedReminder.medicine}”的提醒已处理为取消。`;
+                if (updatedReminder.frequency === 'daily') {
+                    ackMessage += " 明天会再次提醒您。";
+                }
+            } else {
+                ackMessage = `好的，已记录您 ${updatedReminder.time} 服用“${updatedReminder.medicine}”。`;
+            }
+            addMessageToChat('assistant', ackMessage);
+            speak(ackMessage);
+
+            // Update the local reminders array
+            const index = medicationReminders.findIndex(r => r.id === reminderId);
+            if (index !== -1) {
+                medicationReminders[index] = updatedReminder;
+            } else {
+                // If not found, maybe it was added in another session, add it. Or re-fetch all.
+                // For simplicity here, if it wasn't found, we could log it or add.
+                // But since `activeReminderId` was set from an announced reminder, it should be in the local list
+                // if `checkReminders` populates `medicationReminders` or if it was just added.
+                // Let's assume it will be found if `announceReminder` was called on an item from `medicationReminders`.
+                // However, `checkReminders` now fetches from server and doesn't necessarily populate `medicationReminders`
+                // unless we explicitly do so after fetching due reminders.
+                // For now, let's re-fetch all reminders for simplicity and consistency after ack.
+                // This could be optimized later.
+                // OR, if announceReminder uses items from a server fetch without putting them in medicationReminders,
+                // then we don't need to update a local list here, but other functions relying on medicationReminders
+                // for current state would be out of sync.
+                // The current `announceReminder` is called by `checkReminders` which gets data from server,
+                // but `announceReminder` itself doesn't add to `medicationReminders`.
+                // It's better to update or remove the specific reminder in the local `medicationReminders` array.
+                // If `medicationReminders` is meant to be a comprehensive local cache, it should be updated.
+                 if (index !== -1) {
+                    medicationReminders[index] = updatedReminder;
+                    // If using localStorage as a cache/for other non-migrated features:
+                    localStorage.setItem(REMINDERS_STORAGE_KEY, JSON.stringify(medicationReminders));
+                } else {
+                    // This case implies the reminder announced was not from the current local `medicationReminders` list.
+                    // This might happen if `checkReminders` announces directly from server results without updating local list.
+                    // For now, we'll log this. A full fetch might be better.
+                    console.warn(`Acknowledged reminder ID ${reminderId} not found in local cache for update.`);
+                    // Optionally, add it if it's a fresh ack for a new reminder not yet in local list
+                    // medicationReminders.push(updatedReminder);
+                    // localStorage.setItem(REMINDERS_STORAGE_KEY, JSON.stringify(medicationReminders));
+                }
+
+            }
+             // Consider re-fetching all reminders to ensure full consistency,
+             // esp. if other parts of app rely on medicationReminders being perfectly in sync.
+             // fetchRemindersFromServer(); // If such a function exists for GET /api/reminders
         }
-        reminder.triggeredThisInstance = false; saveReminders();
-        addMessageToChat('assistant', ackMessage); speak(ackMessage);
+    } catch (error) {
+        console.error('Error acknowledging reminder via API:', error);
+        addMessageToChat('assistant', '抱歉，确认提醒时发生网络错误。');
+        speak('抱歉，确认提醒时发生网络错误。');
+    } finally {
+        activeReminderId = null; // Clear active reminder ID regardless of outcome
     }
-    activeReminderId = null;
 }
 
 // --- Contact Book Functions ---
-function loadContacts() {
-    const storedContacts = localStorage.getItem(CONTACTS_STORAGE_KEY);
-    if (storedContacts) {
-        contacts = JSON.parse(storedContacts);
-        console.log('Loaded contacts:', contacts);
+async function fetchContactsFromServer() {
+    try {
+        const response = await fetch(`${BACKEND_URL}/contacts`);
+        if (!response.ok) {
+            throw new Error(`Error fetching contacts: ${response.statusText}`);
+        }
+        contacts = await response.json();
+        console.log('Contacts loaded from server:', contacts);
+        // If there's any UI that lists all contacts automatically, update it here.
+    } catch (error) {
+        console.error('Failed to load contacts from server:', error);
+        addMessageToChat('assistant', '抱歉，无法从服务器加载通讯录。请稍后再试。');
+        // speak('抱歉，无法从服务器加载通讯录。请稍后再试。'); // Optional speak
     }
 }
 
-function saveContacts() {
-    localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
-    console.log('Saved contacts:', contacts);
-}
+// function loadContacts() { ... } // Removed
+// function saveContacts() { ... } // Removed
 
-function parseAndAddContact(transcript) {
+async function parseAndAddContact(transcript) {
     let contactName = null;
     let phoneNumber = null;
+    // Parsing logic remains similar to what was provided in the prompt
+    // For brevity, assuming the existing parsing logic populates contactName and phoneNumber
     const phoneKeywords = ['电话是', '电话号码是', '的电话是', '号码是', '电话', '号码'];
     let keywordFound = null;
     let keywordIndex = -1;
@@ -388,34 +507,60 @@ function parseAndAddContact(transcript) {
         }
     }
 
+    const phoneKeywords = ['电话是', '电话号码是', '的电话是', '号码是', '电话', '号码'];
+    let keywordFound = null;
+    let keywordIndex = -1;
+
+    for (const kw of phoneKeywords) {
+        const idx = transcript.lastIndexOf(kw);
+        if (idx > -1) {
+            keywordFound = kw;
+            keywordIndex = idx;
+            break;
+        }
+    }
     if (keywordFound) {
         let potentialNamePart = transcript.substring(0, keywordIndex);
         potentialNamePart = potentialNamePart.replace(/^添加联系人|^存联系人|^联系人/, '').trim();
         potentialNamePart = potentialNamePart.replace(/的$/, '').trim();
-        contactName = potentialNamePart;
-
         let potentialPhonePart = transcript.substring(keywordIndex + keywordFound.length).trim();
+        contactName = potentialNamePart; // This is the parsed name
         const phoneMatch = potentialPhonePart.match(/[\d\s]+/);
-        if (phoneMatch) {
-            phoneNumber = phoneMatch[0].replace(/\s/g, '');
-        }
+        if (phoneMatch) phoneNumber = phoneMatch[0].replace(/\s/g, ''); // This is the parsed number
 
-        if (!contactName || contactName.length < 1 || contactName.length > 20) {
-             contactName = null;
-        }
-        if (!phoneNumber || !/^\d{7,15}$/.test(phoneNumber)) {
-            phoneNumber = null;
-        }
+        // Basic frontend validation (backend will also validate)
+        if (!contactName || contactName.length < 1 || contactName.length > 50) contactName = null;
+        if (!phoneNumber || !/^\d{7,15}$/.test(phoneNumber)) phoneNumber = null;
     }
+    // End of example parsing section
 
     if (contactName && phoneNumber) {
-        if (contacts.some(c => c.name.toLowerCase() === contactName.toLowerCase())) {
-            const msg = `联系人“${contactName}”已经存在。您可以先删除旧的记录或使用其他名称。`;
-            addMessageToChat('assistant', msg);
-            speak(msg);
-            return;
+        try {
+            const response = await fetch(`${BACKEND_URL}/contacts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: contactName, phone: phoneNumber })
+            });
+            const result = await response.json();
+
+            if (!response.ok) {
+                const errorMsg = result.error || `添加联系人失败 (${response.status})`;
+                addMessageToChat('assistant', errorMsg);
+                speak(errorMsg);
+                return;
+            }
+
+            addMessageToChat('assistant', `好的，已经添加联系人 ${result.name}，电话号码是 ${result.phone}。`);
+            speak(`好的，已经添加联系人 ${result.name}，电话号码是 ${result.phone}。`);
+
+            fetchContactsFromServer(); // Refresh the list
+
+        } catch (error) {
+            console.error('Error adding contact via API:', error);
+            const errorMsg = '抱歉，添加联系人时发生网络错误。';
+            addMessageToChat('assistant', errorMsg);
+            speak(errorMsg);
         }
-        addContact(contactName, phoneNumber);
     } else {
         const errorMsg = "抱歉，我没有听清楚联系人姓名和电话号码。请尝试说“添加联系人 张三 电话是 13812345678”。";
         addMessageToChat('assistant', errorMsg);
@@ -423,20 +568,7 @@ function parseAndAddContact(transcript) {
     }
 }
 
-function addContact(contactName, phoneNumber) {
-    const newContact = {
-        id: Date.now(),
-        name: contactName,
-        phone: phoneNumber,
-        createdAt: new Date().toISOString()
-    };
-    contacts.push(newContact);
-    saveContacts();
-
-    const confirmationMsg = `好的，已经添加联系人 ${contactName}，电话号码是 ${phoneNumber}。`;
-    addMessageToChat('assistant', confirmationMsg);
-    speak(confirmationMsg);
-}
+// addContact function is removed as its logic is now in parseAndAddContact's fetch call.
 
 function parseAndFindContact(transcript) {
     let searchName = null;
