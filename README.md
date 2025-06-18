@@ -61,5 +61,10 @@ This project is a web-based AI voice assistant application designed to provide u
 *   更完善的设置页面 (Comprehensive Settings Page)
 *   更自然的对话流程 (More natural conversation flow)
 
+### 最近进展 (Recent Progress)
+
+* 后端 `/reminders` 现在可以返回已设置的所有提醒。
+* `/chat` 路由提供了简单的规则回复，为后续接入大模型做准备。
+
 ---
 欢迎提出改进建议！(Contributions and suggestions are welcome!)

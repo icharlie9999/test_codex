@@ -76,14 +76,39 @@ def get_contacts_api():
         if conn:
             conn.close()
 
-# ... (Keep other placeholder endpoints for /chat, /reminders etc.) ...
+# ... (Basic echo chat endpoint, placeholder for future Gemini integration) ...
 @app.route('/chat', methods=['POST'])
 def chat():
-   return jsonify({"reply": "Chat endpoint not fully implemented yet. Gemini integration pending."}), 501
+    data = request.json
+    user_message = data.get('message', '').strip() if data else ''
+    if not user_message:
+        return jsonify({"error": "Message is required."}), 400
+
+    # Simple rule-based response for now
+    if '你好' in user_message or '您好' in user_message:
+        reply = '你好，很高兴与您聊天。'
+    elif '谢谢' in user_message:
+        reply = '不用客气！'
+    else:
+        reply = f"你说：{user_message}"
+
+    return jsonify({"reply": reply}), 200
 
 @app.route('/reminders', methods=['GET'])
 def get_reminders_api():
-   return jsonify({"message": "Reminders GET not implemented"}), 501
+    conn = database.get_db_connection()
+    try:
+        reminders_cursor = conn.execute(
+            "SELECT * FROM medication_reminders ORDER BY id"
+        )
+        reminders_list = [dict(row) for row in reminders_cursor.fetchall()]
+        return jsonify(reminders_list), 200
+    except sqlite3.Error as e:
+        app.logger.error(f"Database error fetching reminders: {e}")
+        return jsonify({"error": "Database operation failed."}), 500
+    finally:
+        if conn:
+            conn.close()
 
 @app.route('/reminders/due', methods=['GET'])
 def get_due_reminders_api():
