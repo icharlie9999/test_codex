@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 语音助手</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>AI 语音助手</h1>
+    </header>
+
+    <main>
+        <section id="character-selection">
+            <h2>选择一个卡通人物</h2>
+            <!-- Character images will go here -->
+            <div class="character-options">
+                <img src="placeholder-char1.png" alt="卡通人物1" data-char="char1">
+                <img src="placeholder-char2.png" alt="卡通人物2" data-char="char2">
+                <img src="placeholder-char3.png" alt="卡通人物3" data-char="char3">
+            </div>
+        </section>
+
+        <section id="chat-interface">
+            <h2>聊天</h2>
+            <div id="selected-character-display">
+                <!-- Selected character will be shown here -->
+            </div>
+            <div id="chat-history">
+                <!-- Chat messages will appear here -->
+            </div>
+            <div id="voice-controls">
+                <button id="start-stt">开始语音输入</button>
+                <p id="stt-output">你说的是: ...</p>
+            </div>
+        </section>
+
+        <section id="settings-placeholder">
+            <h2>设置</h2>
+            <p>功能设置区域</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 AI 语音助手</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
